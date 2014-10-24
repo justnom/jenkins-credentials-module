@@ -3,7 +3,6 @@
 import os
 import uuid
 import base64
-import random
 from hashlib import sha256
 from Crypto.Cipher import AES
 import xml.etree.cElementTree as ET
@@ -63,10 +62,16 @@ class BasicCredentials(object):
     def _create_secret_key(self):
         """
         Create a 256 byte random key, add le magic
-        and pad it.
+        and pad it. Finally - encrypt it with the master key.
         :return:
         """
-        return self._pad(os.urandom(256) + MAGIC)
+        data = self._pad(os.urandom(256) + MAGIC)
+        hashed_master_key = self._read_hashed_master_key()
+        return AES.new(hashed_master_key, AES.MODE_ECB).encrypt(data)
+
+    def _read_hashed_master_key(self):
+        master_key = open(os.path.join(self.home_path, MASTER_KEY_PATH)).read()
+        return sha256(master_key).digest()[:16]
 
     def _read_secret_key(self):
         secret_key_path = os.path.join(self.home_path, HUDSON_UTIL_SECRET_PATH)
@@ -79,9 +84,8 @@ class BasicCredentials(object):
             return data
 
     def _encrypt(self, password):
-        master_key = open(os.path.join(self.home_path, MASTER_KEY_PATH)).read()
         secret_key = self._read_secret_key()
-        hashed_master_key = sha256(master_key).digest()[:16]
+        hashed_master_key = self._read_hashed_master_key()
         k = AES.new(hashed_master_key, AES.MODE_ECB).decrypt(secret_key)[:-16]
         o = AES.new(k[:16], AES.MODE_ECB)
         return base64.encodestring(o.encrypt(self._pad(password + MAGIC))).strip()
@@ -93,9 +97,9 @@ class BasicCredentials(object):
         try:
             self.root_node = ET.parse(self._get_credentials_path()).getroot()
             return
-        except IOError:
-            pass
         except ET.ParseError:
+            pass
+        except IOError:
             pass
         self.root_node = ET.Element(self.root_type)
 
